@@ -1,0 +1,44 @@
+# ava-voice configuration. Relative paths are relative to this file.
+# Full reference: README.md, section "Config reference".
+
+server:
+  launch: true              # start `python -m moshi.server` ourselves; false = connect to one already running
+  host: 127.0.0.1           # where the client connects
+  port: 8998
+  cpu_offload: false        # pass --cpu-offload (needs `accelerate`, much slower; usually not real time)
+  startup_timeout_s: 900    # model load + warmup; first run may also download weights
+  log_file: logs/server.log
+  extra_args: []            # appended verbatim to the moshi.server command line
+
+persona:
+  voice: NATF2              # NATF0-3, NATM0-3, VARF0-4, VARM0-4
+  role_prompt_file: prompts/ava_role.txt
+
+audio:
+  input_device: null        # null = system default; or an index / name substring from `./run.sh --list-devices`
+  output_device: null
+  playback_max_buffer_s: 1.0
+
+echo:
+  # none              - nothing is done; the mic will hear the speaker (a warning is printed)
+  # external          - echo is handled outside ava-voice (headset, AEC speakerphone, system-wide AEC)
+  # pulse_echo_cancel - load PulseAudio/PipeWire module-echo-cancel for the session
+  mode: none
+  pulse:
+    source_master: null     # pactl source name of the real mic; null = current default source
+    sink_master: null       # pactl sink name of the real speaker; null = current default sink
+    aec_method: webrtc
+    aec_args: ""
+
+events:
+  stdout: true              # one JSON object per line on stdout (logs go to stderr)
+  socket: null              # e.g. "unix:/tmp/ava-voice.sock" or "tcp:127.0.0.1:8765"
+
+detection:
+  robot_speech_threshold_dbfs: -40
+  robot_speech_hangover_s: 0.5
+  user_speech_threshold_dbfs: -40
+  user_speech_hangover_s: 0.4
+
+latency:
+  csv_path: logs/latency.csv  # null disables latency logging
