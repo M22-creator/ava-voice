@@ -1,0 +1,19 @@
+# Secrets
+.env
+
+# Local environments and upstream checkout (installed by setup.sh, never committed)
+.venv/
+third_party/
+
+# Runtime output
+logs/
+*.wav
+!tests/data/*.wav
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+build/
+dist/

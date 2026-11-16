@@ -1,0 +1,28 @@
+[project]
+name = "ava-voice"
+version = "0.1.0"
+description = "Headless PersonaPlex-7B voice client for the AVA robot"
+requires-python = ">=3.10,<3.13"
+license = {text = "MIT"}
+# numpy, sphn, aiohttp and sounddevice are also pinned by upstream moshi-personaplex;
+# the ranges below match upstream's so pip never has to pick a different version.
+dependencies = [
+    "numpy >= 1.26, < 2.2",
+    "sphn >= 0.1.4, < 0.2",
+    "aiohttp >= 3.10.5, < 3.11",
+    "sounddevice == 0.5",
+    "pyyaml >= 6.0",
+]
+
+[project.optional-dependencies]
+test = ["pytest >= 8"]
+
+[tool.setuptools]
+packages = ["ava_voice"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[build-system]
+requires = ["setuptools >= 61"]
+build-backend = "setuptools.build_meta"
