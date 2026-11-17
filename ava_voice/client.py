@@ -13,6 +13,7 @@ import numpy as np
 import sphn
 
 from . import protocol
+from .asr import UtteranceCollector
 from .audio import AudioIO
 from .config import DetectionConfig
 from .detect import SpeechActivity
@@ -38,6 +39,9 @@ class VoiceClient:
         latency: LatencyTracker,
         detection: DetectionConfig,
         handshake_timeout_s: float = 120.0,
+        asr=None,
+        asr_min_speech_s: float = 0.3,
+        asr_max_speech_s: float = 20.0,
     ):
         self.url = url
         self.audio = audio
@@ -45,6 +49,12 @@ class VoiceClient:
         self.latency = latency
         self.detection = detection
         self.handshake_timeout_s = handshake_timeout_s
+        # Optional user transcript (separate recognizer; PersonaPlex has none).
+        self.asr = asr
+        self.asr_min_speech_s = asr_min_speech_s
+        self.asr_max_speech_s = asr_max_speech_s
+        self._asr_tasks: set = set()
+        self._asr_sem: Optional[asyncio.Semaphore] = None
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._mic_q: Optional[asyncio.Queue] = None
         self._ready = False
@@ -56,6 +66,8 @@ class VoiceClient:
         self.robot_det = SpeechActivity(d.robot_speech_threshold_dbfs, d.robot_speech_hangover_s)
         self.user_det = SpeechActivity(d.user_speech_threshold_dbfs, d.user_speech_hangover_s)
         self._turn_text: list[str] = []
+        self._collector = (UtteranceCollector(FRAME_SIZE / SAMPLE_RATE, max_s=self.asr_max_speech_s)
+                           if self.asr is not None else None)
 
     # ---- mic side (called from the audio thread) ----------------------------
 
@@ -161,12 +173,17 @@ class VoiceClient:
             while pending.size >= FRAME_SIZE:
                 frame, pending = pending[:FRAME_SIZE], pending[FRAME_SIZE:]
                 frame_t0, pending_t0 = pending_t0, pending_t0 + FRAME_SIZE / SAMPLE_RATE
-                for kind, t in self.user_det.update(frame, frame_t0, SAMPLE_RATE):
+                user_events = self.user_det.update(frame, frame_t0, SAMPLE_RATE)
+                for kind, t in user_events:
                     if kind == "start":
                         self.latency.on_user_start(t)
                     else:
                         self.latency.on_user_end(t)
                 opus_writer.append_pcm(frame)
+                if self._collector is not None:
+                    utterance = self._collector.feed(frame, user_events)
+                    if utterance is not None:
+                        self._start_asr(utterance)
             data = opus_writer.read_bytes()
             if data:
                 await ws.send_bytes(protocol.encode_audio(data))
@@ -227,7 +244,35 @@ class VoiceClient:
         turn = self.turn if self.robot_det.active else self.turn + 1
         self.events.emit("robot_text", turn=turn, delta=piece)
 
+    # ---- user transcript (optional ASR sidecar) ------------------------------
+
+    def _start_asr(self, audio: np.ndarray) -> None:
+        dur = len(audio) / SAMPLE_RATE
+        if dur < self.asr_min_speech_s:
+            return
+        if len(self._asr_tasks) >= 3:  # recognizer cannot keep up: skip rather than lag behind
+            log.warning("ASR busy, skipping a %.1f s utterance", dur)
+            return
+        task = asyncio.create_task(self._transcribe(audio, dur, self.robot_det.active))
+        self._asr_tasks.add(task)
+        task.add_done_callback(self._asr_tasks.discard)
+
+    async def _transcribe(self, audio: np.ndarray, dur: float, robot_was_speaking: bool) -> None:
+        if self._asr_sem is None:
+            self._asr_sem = asyncio.Semaphore(1)
+        async with self._asr_sem:
+            try:
+                res = await asyncio.get_running_loop().run_in_executor(None, self.asr.transcribe, audio, SAMPLE_RATE)
+            except Exception as e:  # never let the transcript break the conversation
+                log.error("ASR failed: %r", e)
+                return
+        if res["text"]:
+            self.events.emit("user_text", text=res["text"], audio_s=round(dur, 2), asr_ms=res["asr_ms"],
+                             engine=getattr(self.asr, "label", "asr"), robot_was_speaking=robot_was_speaking)
+
     def _end_session(self, reason: str) -> None:
+        for t in list(self._asr_tasks):
+            t.cancel()  # a late transcript must not appear after session_closed
         for _, t in self.robot_det.force_end():
             self._robot_end(t, session_ending=True)
         self.audio.clear_playback()

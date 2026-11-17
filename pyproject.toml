@@ -16,6 +16,7 @@ dependencies = [
 
 [project.optional-dependencies]
 test = ["pytest >= 8"]
+asr = ["sherpa-onnx >= 1.12"]   # optional user transcript (Parakeet-TDT), see asr: in config.yaml
 
 [tool.setuptools]
 packages = ["ava_voice"]
