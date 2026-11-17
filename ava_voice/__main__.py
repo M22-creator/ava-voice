@@ -40,7 +40,25 @@ async def amain(cfg, launch_server: bool) -> int:
     events = EventBus.from_config(cfg.events)
     await events.start_socket(cfg.events.socket)
     server = None
+    webview = None
     try:
+        asr = None
+        if cfg.asr.enabled:
+            from .asr import build_asr
+
+            asr = build_asr(cfg.asr, cfg.base_dir)  # FileNotFoundError with the fix if weights are missing
+            log.info("user transcript: %s (separate recognizer; PersonaPlex has none)", asr.label)
+        if cfg.web.enabled:
+            from .web import WebView
+
+            webview = WebView(
+                events, cfg.resolve(cfg.latency.csv_path) if cfg.latency.csv_path else None,
+                cfg.web.host, cfg.web.port, cfg.web.history,
+                info={"voice": cfg.persona.voice, "asr": asr.label if asr else None,
+                      "server": f"{cfg.server.host}:{cfg.server.port}"},
+            )
+            await webview.start()
+
         if launch_server:
             server = ServerProcess(build_server_argv(cfg.server), cfg.resolve(cfg.server.log_file))
             server.start()
@@ -57,16 +75,19 @@ async def amain(cfg, launch_server: bool) -> int:
         url = protocol.build_url(cfg.server.host, cfg.server.port, cfg.persona.voice, cfg.role_prompt())
         audio = SoundDeviceIO(cfg.audio.input_device, cfg.audio.output_device, cfg.audio.playback_max_buffer_s)
         latency = LatencyTracker(cfg.resolve(cfg.latency.csv_path) if cfg.latency.csv_path else None)
-        client = VoiceClient(url, audio, events, latency, cfg.detection)
+        client = VoiceClient(url, audio, events, latency, cfg.detection, asr=asr,
+                             asr_min_speech_s=cfg.asr.min_speech_s, asr_max_speech_s=cfg.asr.max_speech_s)
         log.info("voice=%s, role prompt from %s", cfg.persona.voice, cfg.persona.role_prompt_file)
         await client.run(stop)
         return 0
-    except ServerError as e:
+    except (ServerError, FileNotFoundError, OSError) as e:  # OSError: e.g. web port already in use
         log.error("%s", e)
         return 1
     finally:
         if server is not None:
             server.stop()
+        if webview is not None:
+            await webview.close()
         await events.close()
 
 

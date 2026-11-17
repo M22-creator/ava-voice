@@ -37,7 +37,7 @@ def test_launch_server_run_client_and_shut_down(tmp_path, monkeypatch, capsys):
     cfgp = tmp_path / "c.yaml"
     cfgp.write_text(
         f"server: {{port: {port}, startup_timeout_s: 30, log_file: srv.log}}\n"
-        "persona: {role_prompt_file: p.txt}\nlatency: {csv_path: lat.csv}\n"
+        "persona: {role_prompt_file: p.txt}\nlatency: {csv_path: lat.csv}\nweb: {port: 0}\n"
     )
     cfg = load_config(cfgp)
     mock = str(Path(__file__).parent / "mock_server.py")

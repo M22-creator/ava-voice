@@ -42,3 +42,19 @@ detection:
 
 latency:
   csv_path: logs/latency.csv  # null disables latency logging
+
+web:
+  enabled: true             # live page at http://127.0.0.1:8002 (see README, "Web view")
+  host: 127.0.0.1           # local only; from a laptop use: ssh -L 8002:localhost:8002 <robot>
+  port: 8002
+  history: 300
+
+asr:
+  # What the USER said, transcribed by a separate recognizer (PersonaPlex has no transcript).
+  # Needs: .venv/bin/pip install sherpa-onnx && .venv/bin/python -m ava_voice.asr --download
+  enabled: false
+  engine: parakeet          # NVIDIA Parakeet-TDT 0.6B v2 (int8, sherpa-onnx, CPU)
+  model_dir: models
+  threads: 2
+  min_speech_s: 0.3
+  max_speech_s: 20.0

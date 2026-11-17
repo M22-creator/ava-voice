@@ -78,6 +78,26 @@ class DetectionConfig:
 
 
 @dataclass
+class WebConfig:
+    enabled: bool = True
+    host: str = "127.0.0.1"   # local only: the page has no login
+    port: int = 8002
+    history: int = 300        # events kept for a page that connects later
+
+
+@dataclass
+class AsrConfig:
+    # Optional transcript of what the USER said, from a separate speech recognizer
+    # (PersonaPlex itself produces none). Emits user_text events.
+    enabled: bool = False
+    engine: str = "parakeet"
+    model_dir: str = "models"
+    threads: int = 2          # kept low: shares the CPU with the robot's other software
+    min_speech_s: float = 0.3  # ignore shorter blips
+    max_speech_s: float = 20.0
+
+
+@dataclass
 class LatencyConfig:
     csv_path: Optional[str] = "logs/latency.csv"
 
@@ -91,6 +111,8 @@ class Config:
     events: EventsConfig = field(default_factory=EventsConfig)
     detection: DetectionConfig = field(default_factory=DetectionConfig)
     latency: LatencyConfig = field(default_factory=LatencyConfig)
+    web: WebConfig = field(default_factory=WebConfig)
+    asr: AsrConfig = field(default_factory=AsrConfig)
     base_dir: Path = REPO_ROOT
 
     def resolve(self, path: str) -> Path:
@@ -151,6 +173,8 @@ def load_config(path: Optional[Path] = None) -> Config:
         "events": EventsConfig,
         "detection": DetectionConfig,
         "latency": LatencyConfig,
+        "web": WebConfig,
+        "asr": AsrConfig,
     }
     kwargs = {}
     for key, value in raw.items():
@@ -179,5 +203,9 @@ def validate(cfg: Config) -> None:
             raise ConfigError(f"audio.{name} must be a device index, a name, or null")
     if not isinstance(cfg.server.extra_args, list):
         raise ConfigError("server.extra_args must be a list of strings")
+    if cfg.asr.engine not in ("parakeet",):
+        raise ConfigError(f"asr.engine must be 'parakeet', got '{cfg.asr.engine}'")
+    if not (0 <= cfg.web.port < 65536):
+        raise ConfigError("web.port must be 0-65535 (0 = any free port)")
     if cfg.audio.playback_max_buffer_s <= 0:
         raise ConfigError("audio.playback_max_buffer_s must be > 0")
