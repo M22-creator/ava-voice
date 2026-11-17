@@ -90,6 +90,11 @@ facts against the new source.
 | `detection.user_speech_threshold_dbfs` | `-40` | Mic level that counts as the user speaking (latency logging only). |
 | `detection.user_speech_hangover_s` | `0.4` | Quiet time that ends a user utterance. |
 | `latency.csv_path` | `logs/latency.csv` | `null` disables latency logging. |
+| `web.enabled` / `web.host` / `web.port` | `true` / `127.0.0.1` / `8002` | Live conversation page. Local only by default (no login). |
+| `web.history` | `300` | Events kept for a page that is opened later. |
+| `asr.enabled` | `false` | Transcribe the user with a separate recognizer and emit `user_text`. |
+| `asr.engine` / `asr.model_dir` / `asr.threads` | `parakeet` / `models` / `2` | Recognizer (Parakeet-TDT 0.6B v2, CPU), where its weights are, CPU threads. |
+| `asr.min_speech_s` / `asr.max_speech_s` | `0.3` / `20` | Shorter utterances are ignored; longer ones are cut. |
 
 The model always uses 24 kHz mono, and the client opens the devices at that rate. Desktop
 audio servers (PulseAudio/PipeWire, which the ALSA `default`/`pulse`/`pipewire` devices go
@@ -102,8 +107,10 @@ Events are JSON objects, one per line, on **stdout** (logs go to stderr) and, if
 receive; anything they send is ignored. Example consumer: `socat - UNIX-CONNECT:/tmp/ava-voice.sock`.
 
 > **PersonaPlex does not produce a transcript of what the user said.** The only text it
-> outputs is the robot's own reply. No event carries user text, and none can be added
-> without a separate speech recognizer.
+> outputs is the robot's own reply. User text exists only if the optional ASR sidecar is
+> enabled (`asr.enabled: true`, see [Web view and user transcript](#web-view-and-user-transcript)):
+> then a separate recognizer (NVIDIA Parakeet-TDT) emits `user_text` events. That text is
+> that recognizer's guess, not something PersonaPlex heard or used.
 
 Every event has:
 
@@ -121,6 +128,7 @@ Every event has:
 | `robot_text` | `turn` (int), `delta` (string, may start with a space) | A piece of the robot's reply text, as the model generates it. It may arrive just before the matching `robot_speaking_start`, and then carries that upcoming turn number. |
 | `robot_speaking_end` | `turn` (int), `audible_until` (float), `text` (string, the turn's full reply text) | Reply audio stayed below the threshold for `robot_speech_hangover_s`. |
 | `session_closed` | `reason`: `"server_closed"`, `"stopped"` or `"error"` | The connection ended. A new `listening` follows if the client reconnects. |
+| `user_text` | `text`, `audio_s` (utterance length), `asr_ms` (transcription time), `engine`, `robot_was_speaking` (bool) | **Only with `asr.enabled: true`.** One finished user utterance, transcribed by the separate recognizer. Arrives `asr_ms` after the utterance ended; may come after the robot already started answering. |
 
 Example:
 
@@ -136,6 +144,36 @@ Speaking start and end are inferred from the loudness of the reply audio, becaus
 server streams audio all the time, with near-silence when the robot is not talking.
 Breaths or very quiet speech can shift the boundaries, so tune the `detection.*` values on
 the robot.
+
+## Web view and user transcript
+
+While `./run.sh` runs, open **http://127.0.0.1:8002** (from a laptop:
+`ssh -L 8002:localhost:8002 <user>@<robot>`, then http://localhost:8002). The page shows:
+
+- the state (listening / AVA speaking / disconnected),
+- the conversation: AVA's reply text as it is generated, and, with the ASR sidecar, what
+  the user said (labelled with the recognizer that produced it),
+- response latency per turn from `logs/latency.csv` (median, 95th percentile, last),
+- the raw event stream.
+
+The page has no login and listens on 127.0.0.1 only. It reads `GET /events`
+(Server-Sent Events), `/api/history` and `/api/latency`, so other tools can use those too.
+
+To show what the user said, enable the ASR sidecar:
+
+```bash
+.venv/bin/pip install "sherpa-onnx>=1.12"
+.venv/bin/python -m ava_voice.asr --download     # ~0.5 GB into models/, SHA-256 checked
+# config.yaml: asr: {enabled: true}
+```
+
+The client cuts the microphone stream into utterances with its speech detector (with 0.3 s
+of pre-roll) and transcribes each finished one on the CPU (2 threads by default), one at a
+time. This never changes the audio sent to PersonaPlex. Parakeet-TDT is the default because it
+was the most accurate and by far the fastest of three recognizers (Vosk, Whisper small.en,
+Parakeet) in a first small test on a laptop (20 LibriSpeech utterances, `ava-speech-eval`
+repository); the full benchmark on the robot computer is still to be run. Without echo cancellation it will also transcribe AVA's own voice; such
+utterances are marked `robot_was_speaking: true`.
 
 ## Latency log
 
